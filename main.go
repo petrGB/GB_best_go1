@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -23,18 +26,38 @@ type CrawlResult struct {
 type Page interface {
 	GetTitle() string
 	GetLinks() []string
+	MakeFullUrl(string) string
 }
 
 type page struct {
+	url string
 	doc *goquery.Document
 }
 
-func NewPage(raw io.Reader) (Page, error) {
+func NewPage(url string, raw io.Reader) (Page, error) {
 	doc, err := goquery.NewDocumentFromReader(raw)
 	if err != nil {
 		return nil, err
 	}
-	return &page{doc: doc}, nil
+	return &page{url: url, doc: doc}, nil
+}
+
+func (p *page) MakeFullUrl(shortUrl string) string {
+	u, err := url.Parse(p.url)
+	if err != nil {
+		return ""
+	}
+
+	//собираем полный url
+	if strings.Index(shortUrl, "http") != 0 {
+		if u.User != nil {
+			shortUrl = fmt.Sprintf("%s://%s@%s", u.Scheme, u.User, u.Host)
+		} else {
+			shortUrl = fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+		}
+	}
+
+	return shortUrl
 }
 
 func (p *page) GetTitle() string {
@@ -46,6 +69,7 @@ func (p *page) GetLinks() []string {
 	p.doc.Find("a").Each(func(_ int, s *goquery.Selection) {
 		url, ok := s.Attr("href")
 		if ok {
+			url = p.MakeFullUrl(url)
 			urls = append(urls, url)
 		}
 	})
@@ -81,13 +105,13 @@ func (r requester) Get(ctx context.Context, url string) (Page, error) {
 			return nil, err
 		}
 		defer body.Body.Close()
-		page, err := NewPage(body.Body)
+		page, err := NewPage(url, body.Body)
 		if err != nil {
 			return nil, err
 		}
 		return page, nil
 	}
-	return nil, nil
+
 }
 
 //Crawler - интерфейс (контракт) краулера
@@ -116,12 +140,16 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 	if depth <= 0 { //Проверяем то, что есть запас по глубине
 		return
 	}
-	c.mu.RLock()
+
+	c.mu.Lock()
 	_, ok := c.visited[url] //Проверяем, что мы ещё не смотрели эту страницу
-	c.mu.RUnlock()
 	if ok {
+		c.mu.Unlock()
 		return
 	}
+	c.visited[url] = struct{}{} //Помечаем страницу просмотренной (еще до того как посмотрели, чтоб другие грутины не пытались паралельно)
+	c.mu.Unlock()
+
 	select {
 	case <-ctx.Done(): //Если контекст завершен - прекращаем выполнение
 		return
@@ -131,9 +159,6 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 			c.res <- CrawlResult{Err: err} //Записываем ошибку в канал
 			return
 		}
-		c.mu.Lock()
-		c.visited[url] = struct{}{} //Помечаем страницу просмотренной
-		c.mu.Unlock()
 		c.res <- CrawlResult{ //Отправляем результаты в канал
 			Title: page.GetTitle(),
 			Url:   url,
