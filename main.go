@@ -116,7 +116,7 @@ func (r requester) Get(ctx context.Context, url string) (Page, error) {
 
 //Crawler - интерфейс (контракт) краулера
 type Crawler interface {
-	Scan(ctx context.Context, url string, depth int)
+	Scan(ctx context.Context, wg *sync.WaitGroup, url string, depth int)
 	ChanResult() <-chan CrawlResult
 }
 
@@ -136,7 +136,9 @@ func NewCrawler(r Requester) *crawler {
 	}
 }
 
-func (c *crawler) Scan(ctx context.Context, url string, depth int) {
+func (c *crawler) Scan(ctx context.Context, wg *sync.WaitGroup, url string, depth int) {
+	defer wg.Done()
+
 	if depth <= 0 { //Проверяем то, что есть запас по глубине
 		return
 	}
@@ -164,7 +166,8 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 			Url:   url,
 		}
 		for _, link := range page.GetLinks() {
-			go c.Scan(ctx, link, depth-1) //На все полученные ссылки запускаем новую рутину сборки
+			wg.Add(1)
+			go c.Scan(ctx, wg, link, depth-1) //На все полученные ссылки запускаем новую рутину сборки
 		}
 	}
 }
@@ -198,8 +201,15 @@ func main() {
 	cr = NewCrawler(r)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go cr.Scan(ctx, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
-	go processResult(ctx, cancel, cr, cfg) //Обрабатываем результаты в отдельной рутине
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go cr.Scan(ctx, &wg, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
+	go processResult(ctx, cancel, cr, cfg)      //Обрабатываем результаты в отдельной рутине
+	go func() {
+		wg.Wait()
+		cancel() //все сканы завершились, а maxResult не достигнут
+	}()
 
 	sigCh := make(chan os.Signal)        //Создаем канал для приема сигналов
 	signal.Notify(sigCh, syscall.SIGINT) //Подписываемся на сигнал SIGINT
