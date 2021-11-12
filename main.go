@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -124,7 +125,7 @@ type Crawler interface {
 	Scan(ctx context.Context, wg *sync.WaitGroup, url string, depth int)
 	ChanResult() <-chan CrawlResult
 	ToChanResult(CrawlResult)
-	DepthDiff(int)
+	DepthDiff(int32)
 }
 
 type crawler struct {
@@ -132,7 +133,7 @@ type crawler struct {
 	res       chan CrawlResult
 	visited   map[string]struct{}
 	mu        sync.RWMutex
-	depthDiff int // для изменения depth
+	depthDiff int32 // для изменения depth
 }
 
 func NewCrawler(r Requester) *crawler {
@@ -145,10 +146,8 @@ func NewCrawler(r Requester) *crawler {
 	}
 }
 
-func (c *crawler) DepthDiff(diff int) {
-	c.mu.Lock()
-	c.depthDiff = c.depthDiff + diff
-	c.mu.Unlock()
+func (c *crawler) DepthDiff(diff int32) {
+	atomic.AddInt32(&c.depthDiff, diff)
 }
 
 func (c *crawler) Scan(ctx context.Context, wg *sync.WaitGroup, url string, depth int) {
@@ -183,7 +182,7 @@ func (c *crawler) Scan(ctx context.Context, wg *sync.WaitGroup, url string, dept
 		for _, link := range page.GetLinks() {
 			wg.Add(1)
 			c.mu.RLock()
-			go c.Scan(ctx, wg, link, c.depthDiff+depth-1) //На все полученные ссылки запускаем новую рутину сборки
+			go c.Scan(ctx, wg, link, int(c.depthDiff)+depth-1) //На все полученные ссылки запускаем новую рутину сборки
 			c.mu.RUnlock()
 		}
 	}
@@ -251,6 +250,9 @@ func main() {
 			if sig == syscall.SIGUSR1 {
 				log.Println("received syscall SIGUSR1")
 				cr.DepthDiff(2)
+			} else if sig == syscall.SIGUSR2 {
+				log.Println("received syscall SIGUSR2")
+				cr.DepthDiff(-2)
 			} else {
 				cancel() //Если пришёл сигнал SigInt - завершаем контекст
 			}
