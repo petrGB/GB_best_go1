@@ -27,37 +27,41 @@ type CrawlResult struct {
 type Page interface {
 	GetTitle() string
 	GetLinks() []string
-	MakeFullUrl(string) string
+	makeFullUrl(string) string
 }
 
 type page struct {
-	url string
-	doc *goquery.Document
+	url     string
+	mainUrl string
+	doc     *goquery.Document
 }
 
-func NewPage(url string, raw io.Reader) (Page, error) {
+func NewPage(inUrl string, raw io.Reader) (Page, error) {
 	doc, err := goquery.NewDocumentFromReader(raw)
 	if err != nil {
 		return nil, err
 	}
-	return &page{url: url, doc: doc}, nil
-}
 
-func (p *page) MakeFullUrl(shortUrl string) string {
-	u, err := url.Parse(p.url)
-	if err != nil {
-		return ""
-	}
-
-	//собираем полный url
-	if strings.Index(shortUrl, "http") != 0 {
+	//сохраняем основной url сайта
+	mainUrl := inUrl
+	u, err := url.Parse(inUrl)
+	if err == nil {
 		if u.User != nil {
-			shortUrl = fmt.Sprintf("%s://%s@%s", u.Scheme, u.User, u.Host)
+			mainUrl = fmt.Sprintf("%s://%s@%s", u.Scheme, u.User, u.Host)
 		} else {
-			shortUrl = fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+			mainUrl = fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 		}
 	}
+	mainUrl = strings.TrimRight(mainUrl, "/")
 
+	return &page{url: inUrl, mainUrl: mainUrl, doc: doc}, nil
+}
+
+func (p *page) makeFullUrl(shortUrl string) string {
+	if strings.Index(shortUrl, "http") != 0 {
+		shortUrl = strings.TrimLeft(shortUrl, "/")
+		return p.mainUrl + "/" + shortUrl
+	}
 	return shortUrl
 }
 
@@ -70,7 +74,7 @@ func (p *page) GetLinks() []string {
 	p.doc.Find("a").Each(func(_ int, s *goquery.Selection) {
 		url, ok := s.Attr("href")
 		if ok {
-			url = p.MakeFullUrl(url)
+			url = p.makeFullUrl(url)
 			urls = append(urls, url)
 		}
 	})
@@ -208,8 +212,8 @@ func main() {
 	log.Printf("My pid: %d\n", os.Getpid())
 
 	cfg := Config{
-		MaxDepth:       1,
-		MaxResults:     10,
+		MaxDepth:       5,
+		MaxResults:     50,
 		MaxErrors:      5,
 		Url:            "https://telegram.org",
 		RequestTimeout: 10,
