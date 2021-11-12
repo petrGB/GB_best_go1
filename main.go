@@ -19,6 +19,7 @@ import (
 
 type CrawlResult struct {
 	Err   error
+	Info  string
 	Title string
 	Url   string
 }
@@ -118,22 +119,32 @@ func (r requester) Get(ctx context.Context, url string) (Page, error) {
 type Crawler interface {
 	Scan(ctx context.Context, wg *sync.WaitGroup, url string, depth int)
 	ChanResult() <-chan CrawlResult
+	ToChanResult(CrawlResult)
+	DepthDiff(int)
 }
 
 type crawler struct {
-	r       Requester
-	res     chan CrawlResult
-	visited map[string]struct{}
-	mu      sync.RWMutex
+	r         Requester
+	res       chan CrawlResult
+	visited   map[string]struct{}
+	mu        sync.RWMutex
+	depthDiff int // для изменения depth
 }
 
 func NewCrawler(r Requester) *crawler {
 	return &crawler{
-		r:       r,
-		res:     make(chan CrawlResult),
-		visited: make(map[string]struct{}),
-		mu:      sync.RWMutex{},
+		r:         r,
+		res:       make(chan CrawlResult),
+		visited:   make(map[string]struct{}),
+		mu:        sync.RWMutex{},
+		depthDiff: 0,
 	}
+}
+
+func (c *crawler) DepthDiff(diff int) {
+	c.mu.Lock()
+	c.depthDiff = c.depthDiff + diff
+	c.mu.Unlock()
 }
 
 func (c *crawler) Scan(ctx context.Context, wg *sync.WaitGroup, url string, depth int) {
@@ -167,13 +178,19 @@ func (c *crawler) Scan(ctx context.Context, wg *sync.WaitGroup, url string, dept
 		}
 		for _, link := range page.GetLinks() {
 			wg.Add(1)
-			go c.Scan(ctx, wg, link, depth-1) //На все полученные ссылки запускаем новую рутину сборки
+			c.mu.RLock()
+			go c.Scan(ctx, wg, link, c.depthDiff+depth-1) //На все полученные ссылки запускаем новую рутину сборки
+			c.mu.RUnlock()
 		}
 	}
 }
 
 func (c *crawler) ChanResult() <-chan CrawlResult {
 	return c.res
+}
+
+func (c *crawler) ToChanResult(crawResult CrawlResult) {
+	c.res <- crawResult
 }
 
 //Config - структура для конфигурации
@@ -187,6 +204,8 @@ type Config struct {
 }
 
 func main() {
+
+	log.Printf("My pid: %d\n", os.Getpid())
 
 	cfg := Config{
 		MaxDepth:       1,
@@ -209,17 +228,28 @@ func main() {
 	go processResult(ctx, cancel, cr, cfg)      //Обрабатываем результаты в отдельной рутине
 	go func() {
 		wg.Wait()
+		cr.ToChanResult(CrawlResult{
+			Info: "All urls already scanned", //Записываем сообщение канал
+		})
 		cancel() //все сканы завершились, а maxResult не достигнут
 	}()
 
-	sigCh := make(chan os.Signal)        //Создаем канал для приема сигналов
-	signal.Notify(sigCh, syscall.SIGINT) //Подписываемся на сигнал SIGINT
+	sigCh := make(chan os.Signal) //Создаем канал для приема сигналов
+	signal.Notify(sigCh,
+		syscall.SIGINT,  //Подписываемся на сигнал SIGINT
+		syscall.SIGUSR1, //Подписываемся на сигнал SIGUSR1
+	)
 	for {
 		select {
 		case <-ctx.Done(): //Если всё завершили - выходим
 			return
-		case <-sigCh:
-			cancel() //Если пришёл сигнал SigInt - завершаем контекст
+		case sig := <-sigCh:
+			if sig == syscall.SIGUSR1 {
+				log.Println("received syscall SIGUSR1")
+				cr.DepthDiff(2)
+			} else {
+				cancel() //Если пришёл сигнал SigInt - завершаем контекст
+			}
 		}
 	}
 }
@@ -238,6 +268,8 @@ func processResult(ctx context.Context, cancel func(), cr Crawler, cfg Config) {
 					cancel()
 					return
 				}
+			} else if msg.Info != "" {
+				log.Printf("crawler result return info: %s\n", msg.Info)
 			} else {
 				maxResult--
 				log.Printf("crawler result: [url: %s] Title: %s\n", msg.Url, msg.Title)
