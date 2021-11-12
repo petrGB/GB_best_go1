@@ -178,31 +178,32 @@ func (c *crawler) ChanResult() <-chan CrawlResult {
 
 //Config - структура для конфигурации
 type Config struct {
-	MaxDepth   int
-	MaxResults int
-	MaxErrors  int
-	Url        string
-	Timeout    int //in seconds
+	MaxDepth       int
+	MaxResults     int
+	MaxErrors      int
+	Url            string
+	RequestTimeout int //in seconds
+	AppTimeout     int //in seconds
 }
 
 func main() {
 
 	cfg := Config{
-		MaxDepth:   3,
-		MaxResults: 10,
-		MaxErrors:  5,
-		Url:        "https://telegram.org",
-		Timeout:    10,
+		MaxDepth:       1,
+		MaxResults:     10,
+		MaxErrors:      5,
+		Url:            "https://telegram.org",
+		RequestTimeout: 10,
+		AppTimeout:     60,
 	}
 	var cr Crawler
 	var r Requester
 
-	r = NewRequester(time.Duration(cfg.Timeout) * time.Second)
+	r = NewRequester(time.Duration(cfg.RequestTimeout) * time.Second)
 	cr = NewCrawler(r)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.AppTimeout*int(time.Second)))
 	var wg sync.WaitGroup
-
 	wg.Add(1)
 	go cr.Scan(ctx, &wg, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
 	go processResult(ctx, cancel, cr, cfg)      //Обрабатываем результаты в отдельной рутине
