@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
+	"lesson1/internal/config"
 	"log"
 	"net/http"
 	"net/url"
@@ -196,28 +198,21 @@ func (c *crawler) ToChanResult(crawResult CrawlResult) {
 	c.res <- crawResult
 }
 
-//Config - структура для конфигурации
-type Config struct {
-	MaxDepth       int
-	MaxResults     int
-	MaxErrors      int
-	Url            string
-	RequestTimeout int //in seconds
-	AppTimeout     int //in seconds
-}
-
 func main() {
 
 	log.Printf("My pid: %d\n", os.Getpid())
 
-	cfg := Config{
-		MaxDepth:       5,
-		MaxResults:     50,
-		MaxErrors:      5,
-		Url:            "https://telegram.org",
-		RequestTimeout: 10,
-		AppTimeout:     60,
+	var configPath string
+	flag.StringVar(&configPath, "config", "config.json", "path to config json file")
+
+	flag.Parse()
+
+	cfg, err := config.NewConfig(configPath)
+	if err != nil {
+		flag.PrintDefaults()
+		panic(err)
 	}
+
 	var cr Crawler
 	var r Requester
 
@@ -260,7 +255,7 @@ func main() {
 	}
 }
 
-func processResult(ctx context.Context, cancel func(), cr Crawler, cfg Config) {
+func processResult(ctx context.Context, cancel func(), cr Crawler, cfg config.Config) {
 	var maxResult, maxErrors = cfg.MaxResults, cfg.MaxErrors
 	for {
 		select {
