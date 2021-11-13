@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -37,22 +36,15 @@ func main() {
 	cr = crawler.NewCrawler(r)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.AppTimeout*int(time.Second)))
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go cr.Scan(ctx, &wg, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
-	go processResult(ctx, cancel, cr, cfg)      //Обрабатываем результаты в отдельной рутине
-	go func() {
-		wg.Wait()
-		cr.ToChanResult(crawler.CrawlResult{
-			Info: "All urls already scanned", //Записываем сообщение канал
-		})
-		cancel() //все сканы завершились, а maxResult не достигнут
-	}()
+
+	go cr.Scan(ctx, cfg.Url, cfg.MaxDepth) //Запускаем краулер в отдельной рутине
+	go processResult(ctx, cancel, cr, cfg) //Обрабатываем результаты в отдельной рутине
 
 	sigCh := make(chan os.Signal) //Создаем канал для приема сигналов
 	signal.Notify(sigCh,
 		syscall.SIGINT,  //Подписываемся на сигнал SIGINT
 		syscall.SIGUSR1, //Подписываемся на сигнал SIGUSR1
+		syscall.SIGUSR2, //Подписываемся на сигнал SIGUSR2
 	)
 	for {
 		select {
@@ -88,6 +80,8 @@ func processResult(ctx context.Context, cancel func(), cr crawler.Crawler, cfg c
 				}
 			} else if msg.Info != "" {
 				log.Printf("crawler result return info: %s\n", msg.Info)
+				cancel()
+				return
 			} else {
 				maxResult--
 				log.Printf("crawler result: [url: %s] Title: %s\n", msg.Url, msg.Title)

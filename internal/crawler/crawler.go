@@ -17,7 +17,7 @@ type CrawlResult struct {
 
 //Crawler - интерфейс (контракт) краулера
 type Crawler interface {
-	Scan(ctx context.Context, wg *sync.WaitGroup, url string, depth int)
+	Scan(ctx context.Context, url string, depth int)
 	ChanResult() <-chan CrawlResult
 	ToChanResult(CrawlResult)
 	DepthDiff(int32)
@@ -29,24 +29,39 @@ type crawler struct {
 	visited   map[string]struct{}
 	mu        sync.RWMutex
 	depthDiff int32 // для изменения depth
+	wg        *sync.WaitGroup
 }
 
 func NewCrawler(r requester.Requester) *crawler {
-	return &crawler{
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	crawler := &crawler{
 		r:         r,
 		res:       make(chan CrawlResult),
 		visited:   make(map[string]struct{}),
 		mu:        sync.RWMutex{},
 		depthDiff: 0,
+		wg:        &wg,
 	}
+
+	go func() {
+		wg.Wait()
+		crawler.ToChanResult(CrawlResult{
+			Info: "All urls already scanned", //Записываем сообщение канал
+		})
+	}()
+
+	return crawler
 }
 
 func (c *crawler) DepthDiff(diff int32) {
 	atomic.AddInt32(&c.depthDiff, diff)
 }
 
-func (c *crawler) Scan(ctx context.Context, wg *sync.WaitGroup, url string, depth int) {
-	defer wg.Done()
+func (c *crawler) Scan(ctx context.Context, url string, depth int) {
+	defer c.wg.Done()
 
 	if depth <= 0 { //Проверяем то, что есть запас по глубине
 		return
@@ -75,8 +90,8 @@ func (c *crawler) Scan(ctx context.Context, wg *sync.WaitGroup, url string, dept
 			Url:   url,
 		}
 		for _, link := range page.GetLinks() {
-			wg.Add(1)
-			go c.Scan(ctx, wg, link, int(c.depthDiff)+depth-1) //На все полученные ссылки запускаем новую рутину сборки
+			c.wg.Add(1)
+			go c.Scan(ctx, link, int(c.depthDiff)+depth-1) //На все полученные ссылки запускаем новую рутину сборки
 		}
 	}
 }
