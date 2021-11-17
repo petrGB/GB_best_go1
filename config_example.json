@@ -4,5 +4,8 @@
     "MaxErrors":5,
     "Url":"https://telegram.org",
     "RequestTimeout":10,
-    "AppTimeout":60
+    "AppTimeout":60,
+
+    "ServerName":"home1",
+    "LogLevelString":"Info"
 }

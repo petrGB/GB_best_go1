@@ -6,6 +6,9 @@ import (
 	"sync/atomic"
 
 	"lesson1/internal/requester"
+
+	"go.uber.org/zap"
+	log "go.uber.org/zap"
 )
 
 type CrawlResult struct {
@@ -30,9 +33,10 @@ type crawler struct {
 	mu        sync.RWMutex
 	depthDiff int32 // для изменения depth
 	wg        *sync.WaitGroup
+	log       *log.Logger
 }
 
-func NewCrawler(r requester.Requester) *crawler {
+func NewCrawler(r requester.Requester, log *log.Logger) *crawler {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -44,6 +48,7 @@ func NewCrawler(r requester.Requester) *crawler {
 		mu:        sync.RWMutex{},
 		depthDiff: 0,
 		wg:        &wg,
+		log:       log,
 	}
 
 	go func() {
@@ -63,6 +68,9 @@ func (c *crawler) DepthDiff(diff int32) {
 func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 	defer c.wg.Done()
 
+	c.log.Debug("start", zap.String("url", url), zap.Int("url", depth))
+	defer c.log.Debug("finish", zap.String("url", url), zap.Int("url", depth))
+
 	if depth <= 0 { //Проверяем то, что есть запас по глубине
 		return
 	}
@@ -78,11 +86,13 @@ func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 
 	select {
 	case <-ctx.Done(): //Если контекст завершен - прекращаем выполнение
+		c.log.Debug("ctx done", zap.String("url", url))
 		return
 	default:
 		page, err := c.r.Get(ctx, url) //Запрашиваем страницу через Requester
 		if err != nil {
 			c.res <- CrawlResult{Err: err} //Записываем ошибку в канал
+			c.log.Error(err.Error(), zap.String("url", url))
 			return
 		}
 		c.res <- CrawlResult{ //Отправляем результаты в канал
