@@ -1,0 +1,8 @@
+{
+    "MaxDepth":2,
+    "MaxResults":15,
+    "MaxErrors":5,
+    "Url":"https://telegram.org",
+    "RequestTimeout":10,
+    "AppTimeout":60
+}
