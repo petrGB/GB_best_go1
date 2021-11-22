@@ -68,8 +68,8 @@ func (c *crawler) DepthDiff(diff int32) {
 func (c *crawler) Scan(ctx context.Context, url string, depth int) {
 	defer c.wg.Done()
 
-	c.log.Debug("start", zap.String("url", url), zap.Int("url", depth))
-	defer c.log.Debug("finish", zap.String("url", url), zap.Int("url", depth))
+	c.log.Debug("start", zap.String("url", url), zap.Int("depth", depth))
+	defer c.log.Debug("finish", zap.String("url", url), zap.Int("depth", depth))
 
 	if depth <= 0 { //Проверяем то, что есть запас по глубине
 		return
