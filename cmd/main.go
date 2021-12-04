@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -42,10 +43,16 @@ func main() {
 		ErrorOutputPaths: []string{"stderr"},
 	}
 
-	log, _ := logCf.Build()
-	defer log.Sync() // flushes buffer, if any
+	zlog, _ := logCf.Build()
+	//Error return value of `log.Sync` is not checked (errcheck)
+	defer func() {
+		err := zlog.Sync() // flushes buffer, if any
+		if err != nil {
+			log.Println(err)
+		}
+	}()
 
-	plog := log.With(zap.Int("pid", os.Getpid()))
+	plog := zlog.With(zap.Int("pid", os.Getpid()))
 
 	plog.Debug("start")
 
@@ -60,7 +67,8 @@ func main() {
 	go cr.Scan(ctx, cfg.Url, cfg.MaxDepth)       //Запускаем краулер в отдельной рутине
 	go processResult(ctx, cancel, cr, cfg, plog) //Обрабатываем результаты в отдельной рутине
 
-	sigCh := make(chan os.Signal) //Создаем канал для приема сигналов
+	//sigchanyzer: misuse of unbuffered os.Signal channel as argument to signal.Notify (govet)
+	sigCh := make(chan os.Signal, 1) //Создаем канал для приема сигналов
 	signal.Notify(sigCh,
 		syscall.SIGINT,  //Подписываемся на сигнал SIGINT
 		syscall.SIGUSR1, //Подписываемся на сигнал SIGUSR1
