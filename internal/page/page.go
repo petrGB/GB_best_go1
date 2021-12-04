@@ -16,9 +16,10 @@ type Page interface {
 }
 
 type page struct {
-	url     string
-	mainUrl string
-	doc     *goquery.Document
+	url        string
+	mainUrl    string
+	mainScheme string
+	doc        *goquery.Document
 }
 
 func NewPage(inUrl string, raw io.Reader) (Page, error) {
@@ -29,6 +30,7 @@ func NewPage(inUrl string, raw io.Reader) (Page, error) {
 
 	//сохраняем основной url сайта
 	mainUrl := inUrl
+	mainScheme := "http"
 	u, err := url.Parse(inUrl)
 	if err == nil {
 		if u.User != nil {
@@ -36,14 +38,17 @@ func NewPage(inUrl string, raw io.Reader) (Page, error) {
 		} else {
 			mainUrl = fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 		}
+		mainScheme = u.Scheme
 	}
 	mainUrl = strings.TrimRight(mainUrl, "/")
 
-	return &page{url: inUrl, mainUrl: mainUrl, doc: doc}, nil
+	return &page{url: inUrl, mainUrl: mainUrl, mainScheme: mainScheme, doc: doc}, nil
 }
 
 func (p *page) makeFullUrl(shortUrl string) string {
-	if strings.Index(shortUrl, "http") != 0 {
+	if strings.Index(shortUrl, "//") == 0 {
+		return p.mainScheme + "://" + strings.TrimLeft(shortUrl, "/")
+	} else if strings.Index(shortUrl, "http") != 0 {
 		shortUrl = strings.TrimLeft(shortUrl, "/")
 		return p.mainUrl + "/" + shortUrl
 	}
